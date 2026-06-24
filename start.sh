@@ -1,21 +1,25 @@
 #!/bin/bash
-# Navega até a pasta onde o script está guardado
 cd "$(dirname "$0")"
 
-echo "========================================="
-echo "   Iniciando Servidor Compartilhado...  "
-echo "========================================="
-
-# Verifica se o ambiente virtual existe, senão ativa o python direto
-if [ -d "venv" ]; then
-    echo "[+] Ativando ambiente virtual (venv)..."
-    source venv/bin/activate
+# Lê o idioma do JSON de forma limpa usando awk/grep nativo
+LANG_CODE="EN-US"
+if [ -f "LANG.json" ]; then
+    DETECTED=$(grep -o '"current_language": *"[^"]*"' LANG.json | cut -d'"' -f4)
+    if [ ! -z "$DETECTED" ]; then LANG_CODE=$DETECTED; fi
 fi
 
-# Executa o servidor
-python3 app.py
+case $LANG_CODE in
+    "PT-BR"|"PT-PT") MSG="Iniciando Servidor...";;
+    "ES-ES"|"ES-US") MSG="Iniciando Servidor...";;
+    "RU-RU") MSG="Запуск сервера...";;
+    *) MSG="Starting Server...";;
+esac
 
-# Se o servidor fechar ou der erro, o terminal não fecha na hora
-echo ""
-echo "Servidor encerrado. Pressione Enter para fechar esta janela."
-read
+echo "========================================="
+echo "   $MSG   "
+echo "========================================="
+
+if [ -d "venv" ]; then
+    source venv/bin/activate
+fi
+python3 app.py
