@@ -1,14 +1,16 @@
 import os
+import json
 import zipfile
 from io import BytesIO
 from datetime import datetime
-from flask import Flask, render_template_string, send_from_directory, request, redirect, send_file, abort
+from flask import Flask, render_template_string, send_from_directory, request, send_file, abort
 
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'upload')
 DOWNLOAD_FOLDER = os.path.join(BASE_DIR, 'download')
+LANG_FILE = os.path.join(BASE_DIR, 'LANG.json')
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['DOWNLOAD_FOLDER'] = DOWNLOAD_FOLDER
@@ -17,20 +19,47 @@ for folder in [UPLOAD_FOLDER, DOWNLOAD_FOLDER]:
     if not os.path.exists(folder):
         os.makedirs(folder)
 
+# Carrega as configurações de idioma do JSON
+def carregar_traducoes():
+    default_lang = "EN-US"
+    if os.path.exists(LANG_FILE):
+        try:
+            with open(LANG_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                current = data.get("current_language", default_lang)
+                return data["translations"].get(current, data["translations"][default_lang])
+        except Exception:
+            pass
+    # Fallback caso dê erro na leitura do JSON
+    return {
+        "title": "Local File Sharing", "main_question": "What would you like to do?",
+        "box_receive_title": "Receive Files", "box_receive_desc": "Choose and download files from the PC",
+        "box_upload_title": "Upload Files", "box_upload_desc": "Send multiple files to the PC",
+        "no_files_selected": "No files selected!", "no_files_pc": "No files found!",
+        "back": "Back", "available_files": "Available Files", "download_selected": "Download Selected",
+        "upload_to_pc": "Upload to PC", "speed": "Speed", "remaining": "Remaining",
+        "finishing": "Finishing...", "screen_awake": "Keeping screen awake...",
+        "success_upload": "All files uploaded successfully!", "error_upload": "Error during upload.",
+        "no_files_uploaded_err": "No files uploaded", "log_download_single": "Device [{ip}] downloaded: '{file}'",
+        "log_download_zip": "Device [{ip}] downloaded {count} files in ZIP.",
+        "log_upload_success": "Device [{ip}] uploaded {count} file(s): {files}"
+    }
+
+lang = carregar_traducoes()
+
 def registrar_log(mensagem):
     horario = datetime.now().strftime('%H:%M:%S')
     print(f"\033[1;32m[LOG {horario}]\033[0m {mensagem}")
 
-# --- PÁGINA INICIAL ---
 @app.route('/')
 def index():
     html_template = """
     <!DOCTYPE html>
-    <html lang="pt-br">
+    <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Compartilhamento Local v5</title>
+        <title>{{ lang['title'] }}</title>
         <style>
             body { font-family: Arial, sans-serif; text-align: center; margin-top: 80px; background-color: #f4f4f9; color: #333; }
             h1 { color: #2c3e50; }
@@ -42,59 +71,57 @@ def index():
         </style>
     </head>
     <body>
-        <h1>O que você deseja fazer?</h1>
+        <h1>{{ lang['main_question'] }}</h1>
         <div class="container">
-            <div class="box" onclick="location.href='/receber'">
-                <h2>Receber Arquivos</h2>
-                <p>Escolher e baixar arquivos do PC</p>
+            <div class="box" onclick="location.href='/receive'">
+                <h2>{{ lang['box_receive_title'] }}</h2>
+                <p>{{ lang['box_receive_desc'] }}</p>
             </div>
-            <div class="box" onclick="location.href='/enviar'">
-                <h2>Enviar Arquivos</h2>
-                <p>Mandar múltiplos arquivos pesados para o PC</p>
+            <div class="box" onclick="location.href='/upload'">
+                <h2>{{ lang['box_upload_title'] }}</h2>
+                <p>{{ lang['box_upload_desc'] }}</p>
             </div>
         </div>
     </body>
     </html>
     """
-    return render_template_string(html_template)
+    return render_template_string(html_template, lang=lang)
 
-
-# --- FLUXO DE RECEBER (PC -> Celular) ---
-@app.route('/receber', methods=['GET', 'POST'])
-def receber():
+@app.route('/receive', methods=['GET', 'POST'])
+def receive():
     if request.method == 'POST':
         selected_files = request.form.getlist('files')
         ip_cliente = request.remote_addr
-
+        
         if not selected_files:
-            return render_template_string('<script>alert("Nenhum arquivo semifinal selecionado!"); window.location.href="/receber";</script>')
-
+            return render_template_string(f'<script>alert("{lang["no_files_selected"]}"); window.location.href="/receive";</script>')
+        
         if len(selected_files) == 1:
             nome_arquivo = selected_files[0]
-            registrar_log(f"O dispositivo [{ip_cliente}] iniciou o download de: '{nome_arquivo}'")
+            registrar_log(lang["log_download_single"].format(ip=ip_cliente, file=nome_arquivo))
             return send_from_directory(app.config['UPLOAD_FOLDER'], nome_arquivo, as_attachment=True)
-
-        registrar_log(f"O dispositivo [{ip_cliente}] iniciou o download de {len(selected_files)} arquivos em ZIP.")
-
+        
+        registrar_log(lang["log_download_zip"].format(ip=ip_cliente, count=len(selected_files)))
+        
         memory_file = BytesIO()
         with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for file in selected_files:
                 file_path = os.path.join(app.config['UPLOAD_FOLDER'], file)
                 if os.path.exists(file_path):
                     zipf.write(file_path, file)
-
+        
         memory_file.seek(0)
-        return send_file(memory_file, download_name='arquivos_compartilhados.zip', as_attachment=True)
+        return send_file(memory_file, download_name='shared_files.zip', as_attachment=True)
 
     files = [f for f in os.listdir(app.config['UPLOAD_FOLDER']) if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], f))]
 
     html_receber = """
     <!DOCTYPE html>
-    <html lang="pt-br">
+    <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Selecionar Arquivos</title>
+        <title>{{ lang['box_receive_title'] }}</title>
         <style>
             body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
             .card { background: white; padding: 30px; display: inline-block; border-radius: 10px; box-shadow: 0px 4px 6px rgba(0,0,0,0.1); text-align: left; min-width: 300px; }
@@ -109,38 +136,36 @@ def receber():
     </head>
     <body>
         <div class="card">
-            <h2>Arquivos Disponíveis</h2>
+            <h2>{{ lang['available_files'] }}</h2>
             {% if files %}
-            <form method="post" action="/receber">
+            <form method="post" action="/receive">
                 {% for file in files %}
                 <div class="file-item">
                     <input type="checkbox" name="files" value="{{ file }}" id="file_{{ loop.index }}">
                     <label for="file_{{ loop.index }}">{{ file }}</label>
                 </div>
                 {% endfor %}
-                <button type="submit">Baixar Selecionados</button>
+                <button type="submit">{{ lang['download_selected'] }}</button>
             </form>
             {% else %}
-                <p class="empty">Nenhum arquivo na pasta 'upload' do PC!</p>
+                <p class="empty">{{ lang['no_files_pc'] }}</p>
             {% endif %}
-            <a class="back" href="/">&larr; Voltar</a>
+            <a class="back" href="/">&larr; {{ lang['back'] }}</a>
         </div>
     </body>
     </html>
     """
-    return render_template_string(html_receber, files=files)
+    return render_template_string(html_receber, files=files, lang=lang)
 
-
-# --- FLUXO DE ENVIAR (Com Velocidade, Tempo Restante e WakeLock) ---
-@app.route('/enviar', methods=['GET', 'POST'])
-def enviar():
+@app.route('/upload', methods=['GET', 'POST'])
+def upload():
     if request.method == 'POST':
         uploaded_files = request.files.getlist('files')
         ip_cliente = request.remote_addr
-
+        
         if not uploaded_files or uploaded_files[0].filename == '':
-            return "Nenhum arquivo enviado", 400
-
+            return lang["no_files_uploaded_err"], 400
+            
         count = 0
         nomes_arquivos = []
         for file in uploaded_files:
@@ -148,25 +173,25 @@ def enviar():
                 file.save(os.path.join(app.config['DOWNLOAD_FOLDER'], file.filename))
                 nomes_arquivos.append(file.filename)
                 count += 1
-
-        registrar_log(f"O dispositivo [{ip_cliente}] enviou {count} arquivo(s) com sucesso: {nomes_arquivos}")
+        
+        registrar_log(lang["log_upload_success"].format(ip=ip_cliente, count=count, files=nomes_arquivos))
         return "OK", 200
 
     html_upload = """
     <!DOCTYPE html>
-    <html lang="pt-br">
+    <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Enviar Arquivos Extras</title>
+        <title>{{ lang['box_upload_title'] }}</title>
         <style>
-            body { font-family: Arial, sans-serif; text-align: center; margin-top: 60px; background-color: #f4f4f9; }
+            body { font-family: Arial, sans-serif; text-align: center; margin-top: 80px; background-color: #f4f4f9; }
             .card { background: white; padding: 30px; display: inline-block; border-radius: 10px; box-shadow: 0px 4px 6px rgba(0,0,0,0.1); width: 340px; }
             input[type="file"] { margin: 20px 0; display: block; width: 100%; }
             button { background: #2ec4b6; color: white; border: none; padding: 12px 20px; font-size: 1em; border-radius: 5px; cursor: pointer; width: 100%; }
             button:hover { background: #011627; }
             .back { display: block; margin-top: 20px; color: #7f8c8d; text-decoration: none; }
-
+            
             #progress-container { display: none; margin-top: 20px; text-align: left; }
             .progress-bar-wrapper { background-color: #e0e0e0; border-radius: 10px; height: 22px; width: 100%; overflow: hidden; margin-top: 5px; position: relative;}
             #progress-bar { background-color: #2ec4b6; height: 100%; width: 0%; transition: width 0.1s linear; }
@@ -177,10 +202,10 @@ def enviar():
     </head>
     <body>
         <div class="card">
-            <h2>Enviar Vídeos Pesados</h2>
+            <h2>{{ lang['box_upload_title'] }}</h2>
             <form id="upload-form">
                 <input type="file" id="file-input" name="files" multiple required>
-                <button type="submit" id="submit-btn">Enviar tudo para o PC</button>
+                <button type="submit" id="submit-btn">{{ lang['upload_to_pc'] }}</button>
             </form>
 
             <div id="progress-container">
@@ -189,19 +214,18 @@ def enviar():
                 </div>
                 <div id="status-text">0%</div>
                 <div class="info-box">
-                    <span id="upload-speed">Velocidade: 0 MB/s</span>
-                    <span id="upload-eta">Restante: --:--</span>
+                    <span id="upload-speed">{{ lang['speed'] }}: 0 MB/s</span>
+                    <span id="upload-eta">{{ lang['remaining'] }}: --:--</span>
                 </div>
-                <div id="wakelock-msg" class="wakelock-status">🔒 Mantendo a tela ligada...</div>
+                <div id="wakelock-msg" class="wakelock-status">🔒 {{ lang['screen_awake'] }}</div>
             </div>
 
-            <a class="back" href="/">&larr; Voltar</a>
+            <a class="back" href="/">&larr; {{ lang['back'] }}</a>
         </div>
 
         <script>
             let wakeLock = null;
 
-            // Função para forçar a tela a ficar ligada
             async function ativarModoTelaAtiva() {
                 try {
                     if ('wakeLock' in navigator) {
@@ -209,12 +233,10 @@ def enviar():
                         document.getElementById('wakelock-msg').style.display = 'block';
                     }
                 } catch (err) {
-                    console.log("WakeLock não suportado ou negado: ", err.message);
                     document.getElementById('wakelock-msg').style.display = 'none';
                 }
             }
 
-            // Função para liberar a tela quando o upload acabar
             function desativarModoTelaAtiva() {
                 if (wakeLock !== null) {
                     wakeLock.release();
@@ -224,7 +246,6 @@ def enviar():
 
             document.getElementById('upload-form').addEventListener('submit', function(e) {
                 e.preventDefault();
-
                 var fileInput = document.getElementById('file-input');
                 if (fileInput.files.length === 0) return;
 
@@ -234,11 +255,8 @@ def enviar():
                 }
 
                 var xhr = new XMLHttpRequest();
-
                 document.getElementById('progress-container').style.display = 'block';
                 document.getElementById('submit-btn').disabled = true;
-
-                // Ativa o bloqueio de descanso de tela antes do upload começar
                 ativarModoTelaAtiva();
 
                 let startTime = new Date().getTime();
@@ -249,53 +267,46 @@ def enviar():
                         document.getElementById('progress-bar').style.width = percent + '%';
                         document.getElementById('status-text').innerText = percent + '%';
 
-                        // Cálculo de Velocidade e Tempo Restante (ETA)
                         let currentTime = new Date().getTime();
-                        let duration = (currentTime - startTime) / 1000; // em segundos
+                        let duration = (currentTime - startTime) / 1000;
                         if (duration > 0) {
-                            let bps = e.loaded / duration; // bytes por segundo
-                            let mbps = (bps / (1024 * 1024)).toFixed(2); // megabytes por segundo
-                            document.getElementById('upload-speed').innerText = "Velocidade: " + mbps + " MB/s";
+                            let bps = e.loaded / duration;
+                            let mbps = (bps / (1024 * 1024)).toFixed(2);
+                            document.getElementById('upload-speed').innerText = "{{ lang['speed'] }}: " + mbps + " MB/s";
 
                             let remainingBytes = e.total - e.loaded;
-                            let remainingTime = remainingBytes / bps; // segundos restantes
+                            let remainingTime = remainingBytes / bps;
 
                             if (remainingTime > 0) {
                                 let mins = Math.floor(remainingTime / 60);
                                 let secs = Math.floor(remainingTime % 60);
-                                // Formata pra ficar bonito (ex: 02m 05s)
                                 let formatado = (mins > 0 ? mins + "m " : "") + secs + "s";
-                                document.getElementById('upload-eta').innerText = "Restante: ~ " + formatado;
+                                document.getElementById('upload-eta').innerText = "{{ lang['remaining'] }}: ~ " + formatado;
                             } else {
-                                document.getElementById('upload-eta').innerText = "Restante: Finalizando...";
+                                document.getElementById('upload-eta').innerText = "{{ lang['remaining'] }}: {{ lang['finishing'] }}";
                             }
                         }
                     }
                 });
 
                 xhr.addEventListener('load', function() {
-                    desativarModoTelaAtiva(); // Devolve o controle da tela ao sistema
-
+                    desativarModoTelaAtiva();
                     if (xhr.status === 200) {
-                        alert("Todos os arquivos pesados foram enviados com sucesso!");
+                        alert("{{ lang['success_upload'] }}");
                     } else {
-                        alert("Ocorreu um erro no envio do arquivo.");
+                        alert("{{ lang['error_upload'] }}");
                     }
-
-                    document.getElementById('progress-container').style.display = 'none';
-                    document.getElementById('submit-btn').disabled = false;
-                    document.getElementById('file-input').value = '';
                     window.location.href = "/";
                 });
 
-                xhr.open('POST', '/enviar', true);
+                xhr.open('POST', '/upload', true);
                 xhr.send(formData);
             });
         </script>
     </body>
     </html>
     """
-    return render_template_string(html_upload)
+    return render_template_string(html_upload, lang=lang)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
