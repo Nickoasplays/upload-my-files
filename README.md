@@ -25,7 +25,7 @@ The system dynamically loads translations from the `LANG.json` file. Supported l
 * 2 Devices on the same network
 
 ### How to start?
-1. Right-click the `iniciar.bat` file in this folder.
+1. Right-click the `start.bat` file in this folder.
 2. Select **Run as Administrator**.
 
 ---
@@ -41,4 +41,4 @@ The system dynamically loads translations from the `LANG.json` file. Supported l
 1. Open your terminal inside this project folder.
 2. Grant execution permission to the script (only needed once):
    ```bash
-   chmod +x iniciar.sh
+   chmod +x start.sh
